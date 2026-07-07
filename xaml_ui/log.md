@@ -1,4 +1,4 @@
-# cloudlog
+# log
 
 ## QA
 ### 1. JSON 処理を JScript に任せるべきか? → 採用しませんでした
