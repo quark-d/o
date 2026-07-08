@@ -1,0 +1,13 @@
+﻿{
+    "title": "出力する列と形式を選択してください",
+    "left": {
+        "caption": "出力する列",
+        "multiSelect": true,
+        "items": ["氏名", "住所", "電話番号", "メールアドレス"]
+    },
+    "right": {
+        "caption": "出力形式",
+        "multiSelect": false,
+        "items": ["新規シート", "CSV ファイル", "クリップボード"]
+    }
+}
