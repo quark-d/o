@@ -1,0 +1,62 @@
+Option Explicit
+
+'==============================================================================
+' 搬入ダイアログ (品番プールへの搬入。ロット指定なし)
+'
+' コントロールは build_xlsm.ps1 がデザイン時に生成する:
+'   cmbItem / lblPool / txtQty / txtDate / cmbRecorder / txtNote / btnOK / btnCancel
+'==============================================================================
+
+Public Result As c_LedgerDialogResult
+Private mCtx As c_DialogContext
+
+Private Sub UserForm_Initialize()
+    Set Result = New c_LedgerDialogResult
+    Result.Init "cancel", Nothing, ""
+End Sub
+
+Public Sub InitDialog(ByVal ctx As c_DialogContext)
+    Set mCtx = ctx
+    Me.Caption = "搬入 (倉庫A → 倉庫B)"
+
+    Dim it As c_ItemInfo
+    For Each it In ctx.Items
+        cmbItem.AddItem it.ItemNo & "  " & it.ItemName
+    Next
+    m_LedgerFormUtil.FillCommon mCtx, cmbRecorder, txtDate
+End Sub
+
+Private Sub cmbItem_Change()
+    If cmbItem.ListIndex < 0 Then Exit Sub
+    Dim it As c_ItemInfo: Set it = mCtx.Items(cmbItem.ListIndex + 1)
+    lblPool.Caption = "現在の未割当在庫: " & _
+        m_LedgerFormUtil.DescribeStates(mCtx, "U", it.ItemNo)
+End Sub
+
+Private Sub btnOK_Click()
+    If cmbItem.ListIndex < 0 Then
+        MsgBox "品番を選択してください。", vbExclamation: Exit Sub
+    End If
+    If Not m_LedgerFormUtil.CheckCommon(txtQty, txtDate, cmbRecorder) Then Exit Sub
+
+    Dim op As New c_LedgerOperation
+    op.Kind = LedgerOpKind.opCarryIn
+    op.ItemNo = mCtx.Items(cmbItem.ListIndex + 1).ItemNo
+    op.Qty = CLng(txtQty.Text)
+    op.ActionDate = CDate(txtDate.Text)
+    op.Recorder = cmbRecorder.Text
+    op.Note = Trim$(txtNote.Text)
+    Result.Init "ok", op, ""
+    Me.Hide
+End Sub
+
+Private Sub btnCancel_Click()
+    Me.Hide
+End Sub
+
+Private Sub UserForm_QueryClose(Cancel As Integer, CloseMode As Integer)
+    If CloseMode = vbFormControlMenu Then
+        Cancel = True
+        Me.Hide
+    End If
+End Sub

@@ -1,0 +1,36 @@
+﻿{
+  "schemaVersion": "1.0",
+  "dialog": "defect",
+  "defaults": { "actionDate": "2026-07-20", "recorder": "山田" },
+  "recorders": ["山田", "佐藤"],
+  "states": ["未処理", "アニール中", "アニール済み", "アセンブリ中", "アセンブリ済み",
+             "梱包中", "梱包済み", "発送準備中", "発送準備完了", "不良"],
+  "items": [
+    { "itemNo": "PN-001", "itemName": "サンプル部品A(梱包のみ)", "pattern": 1 },
+    { "itemNo": "PN-002", "itemName": "サンプル部品B(アセンブリ)", "pattern": 2 },
+    { "itemNo": "PN-003", "itemName": "サンプル部品C(アニール)", "pattern": 3 },
+    { "itemNo": "PN-004", "itemName": "サンプル部品D(アニール+アセンブリ)", "pattern": 4 }
+  ],
+  "lots": [
+    { "lotId": "PN-002_2026-07-13_納期先A", "itemNo": "PN-002", "shipWeek": "2026-07-13",
+      "dest": "納期先A", "required": 5, "planStatus": "有効" },
+    { "lotId": "PN-002_2026-07-13_納期先B", "itemNo": "PN-002", "shipWeek": "2026-07-13",
+      "dest": "納期先B", "required": 6, "planStatus": "有効" },
+    { "lotId": "PN-001_2026-07-20", "itemNo": "PN-001", "shipWeek": "2026-07-20",
+      "dest": "", "required": 10, "planStatus": "有効" },
+    { "lotId": "PN-003_2026-07-20", "itemNo": "PN-003", "shipWeek": "2026-07-20",
+      "dest": "", "required": 8, "planStatus": "有効" }
+  ],
+  "stock": {
+    "lots": [
+      { "lotId": "PN-002_2026-07-13_納期先A", "byState": { "梱包済み": 8, "未処理": -3 } },
+      { "lotId": "PN-002_2026-07-13_納期先B", "byState": { "アセンブリ済み": 6 } },
+      { "lotId": "PN-001_2026-07-20", "byState": { "未処理": 10 } },
+      { "lotId": "PN-003_2026-07-20", "byState": { "アニール中": 6 } }
+    ],
+    "unallocated": [
+      { "itemNo": "PN-001", "byState": { "未処理": 2 } },
+      { "itemNo": "PN-002", "byState": { "未処理": 9 } }
+    ]
+  }
+}
