@@ -24,10 +24,13 @@ Public Sub InitDialog(ByVal ctx As c_DialogContext)
 
     Set mLots = New Collection
     Dim lt As c_LotInfo
+    Dim it As c_ItemInfo
     For Each lt In ctx.Lots
         If lt.PlanStatus = "有効" Then
             mLots.Add lt
-            cmbLot.AddItem lt.LotId & "  (必要 " & lt.Required & ")"
+            Set it = ctx.FindItemByLocalId(lt.LocalId)
+            cmbLot.AddItem lt.LotId & _
+                IIf(it Is Nothing, "", "  " & it.ItemName) & "  (必要 " & lt.Required & ")"
         End If
     Next
     SetRefillEnabled False
@@ -42,18 +45,18 @@ Private Sub cmbLot_Change()
     If cmbLot.ListIndex < 0 Then Exit Sub
 
     Dim lt As c_LotInfo: Set lt = mLots(cmbLot.ListIndex + 1)
-    Dim it As c_ItemInfo: Set it = mCtx.FindItem(lt.ItemNo)
+    Dim it As c_ItemInfo: Set it = mCtx.FindItemByLocalId(lt.LocalId)
     If Not it Is Nothing Then
-        lblItem.Caption = it.ItemNo & "  " & it.ItemName
+        lblItem.Caption = m_LedgerFormUtil.DescribeItem(it)
     Else
-        lblItem.Caption = lt.ItemNo
+        lblItem.Caption = lt.LocalId
     End If
 
     ' 不良の元状態 = そのロットに在庫がある状態のみ
     m_LedgerFormUtil.FillCombo cmbState, mCtx.Stock.StatesWithStock("L", lt.LotId)
-    ' 補填元 = 同品番の未割当在庫がある状態のみ
-    m_LedgerFormUtil.FillCombo cmbRefillState, mCtx.Stock.StatesWithStock("U", lt.ItemNo)
-    lblPool.Caption = "未割当在庫: " & m_LedgerFormUtil.DescribeStates(mCtx, "U", lt.ItemNo)
+    ' 補填元 = 同品番 (localId) の未割当在庫がある状態のみ
+    m_LedgerFormUtil.FillCombo cmbRefillState, mCtx.Stock.StatesWithStock("U", lt.LocalId)
+    lblPool.Caption = "未割当在庫: " & m_LedgerFormUtil.DescribeStates(mCtx, "U", lt.LocalId)
 End Sub
 
 Private Sub cmbState_Change()
@@ -81,7 +84,7 @@ Private Sub SyncRefillQty()
     If cmbLot.ListIndex < 0 Or cmbRefillState.ListIndex < 0 Then Exit Sub
     If Not IsNumeric(txtQty.Text) Then Exit Sub
     Dim lt As c_LotInfo: Set lt = mLots(cmbLot.ListIndex + 1)
-    Dim pool As Long: pool = mCtx.Stock.AvailableQty("U", lt.ItemNo, cmbRefillState.Text)
+    Dim pool As Long: pool = mCtx.Stock.AvailableQty("U", lt.LocalId, cmbRefillState.Text)
     Dim q As Long: q = CLng(txtQty.Text)
     If pool < q Then q = pool
     txtRefillQty.Text = CStr(q)

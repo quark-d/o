@@ -13,8 +13,9 @@ Option Explicit
 ' 納期計画 1 行分 (T_納期計画のスナップショット)
 '==============================================================================
 
-Public LotId As String         ' ロットID (品番_出荷週_納期先)
-Public ItemNo As String        ' 品番
+Public LotId As String         ' ロットID (localId_出荷週_納期先)
+Public LocalId As String       ' localId (内部ID。集計キー)
+Public ItemNo As String        ' 品番 (対外向け8桁番号)
 Public ShipWeek As Date        ' 出荷週 (月曜日付)
 Public Dest As String          ' 納期先 (空欄あり)
 Public Required As Long        ' 必要数

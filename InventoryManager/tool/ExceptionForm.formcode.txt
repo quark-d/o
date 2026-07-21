@@ -1,7 +1,7 @@
 Option Explicit
 
 '==============================================================================
-' 例外操作ダイアログ (廃棄 / 倉庫A戻し / 余剰化 / 充当)
+' 例外操作ダイアログ (廃棄 / 倉庫戻し / 余剰化 / 充当)
 '
 ' 頻度の低い操作を 1 画面に集約。対象は「ロット」または「未割当 (品番)」。
 ' コントロールは build_xlsm.ps1 がデザイン時に生成する:
@@ -13,7 +13,7 @@ Option Explicit
 Public Result As c_LedgerDialogResult
 Private mCtx As c_DialogContext
 Private mTargetLotIds As Collection   ' cmbTarget と同順 (ロットID。未割当は "")
-Private mTargetItems As Collection    ' cmbTarget と同順 (品番)
+Private mTargetLocals As Collection   ' cmbTarget と同順 (localId)
 Private mTargetLots As Collection     ' cmbTargetLot と同順 (充当先候補の c_LotInfo)
 
 Private Sub UserForm_Initialize()
@@ -23,7 +23,7 @@ End Sub
 
 Public Sub InitDialog(ByVal ctx As c_DialogContext)
     Set mCtx = ctx
-    Me.Caption = "例外操作 (廃棄 / 倉庫A戻し / 余剰化 / 充当)"
+    Me.Caption = "例外操作 (廃棄 / 倉庫戻し / 余剰化 / 充当)"
     optDiscard.Value = True
     m_LedgerFormUtil.FillCommon mCtx, cmbRecorder, txtDate
     RebuildTargets
@@ -51,10 +51,10 @@ Private Function CurrentEvent() As String
 End Function
 
 ' 対象リストを操作種別に合わせて作り直す
-'   廃棄       … 不良在庫があるロット/未割当
-'   倉庫A戻し  … 何らかの在庫があるロット/未割当
-'   余剰化     … 何らかの在庫があるロットのみ
-'   充当       … 何らかの在庫があるロット/未割当 (充当元)
+'   廃棄     … 不良在庫があるロット/未割当
+'   倉庫戻し … 何らかの在庫があるロット/未割当
+'   余剰化   … 何らかの在庫があるロットのみ
+'   充当     … 何らかの在庫があるロット/未割当 (充当元)
 Private Sub RebuildTargets()
     Dim ev As String: ev = CurrentEvent()
 
@@ -62,13 +62,13 @@ Private Sub RebuildTargets()
     cmbState.Clear
     lblStock.Caption = ""
     Set mTargetLotIds = New Collection
-    Set mTargetItems = New Collection
+    Set mTargetLocals = New Collection
 
     Dim lt As c_LotInfo
     For Each lt In mCtx.Lots
         If TargetHasStock(ev, "L", lt.LotId) Then
             mTargetLotIds.Add lt.LotId
-            mTargetItems.Add lt.ItemNo
+            mTargetLocals.Add lt.LocalId
             cmbTarget.AddItem "ロット: " & lt.LotId & _
                 IIf(lt.PlanStatus <> "有効", "  [" & lt.PlanStatus & "]", "")
         End If
@@ -77,10 +77,10 @@ Private Sub RebuildTargets()
     If ev <> m_LedgerCore.EV_SURPLUS Then
         Dim it As c_ItemInfo
         For Each it In mCtx.Items
-            If TargetHasStock(ev, "U", it.ItemNo) Then
+            If TargetHasStock(ev, "U", it.LocalId) Then
                 mTargetLotIds.Add ""
-                mTargetItems.Add it.ItemNo
-                cmbTarget.AddItem "未割当: " & it.ItemNo & "  " & it.ItemName
+                mTargetLocals.Add it.LocalId
+                cmbTarget.AddItem "未割当: " & m_LedgerFormUtil.DescribeItem(it)
             End If
         Next
     End If
@@ -109,7 +109,7 @@ Private Sub cmbTarget_Change()
     If mTargetLotIds(idx) <> "" Then
         bucket = "L": id = mTargetLotIds(idx)
     Else
-        bucket = "U": id = mTargetItems(idx)
+        bucket = "U": id = mTargetLocals(idx)
     End If
 
     If CurrentEvent() = m_LedgerCore.EV_DISCARD Then
@@ -120,13 +120,13 @@ Private Sub cmbTarget_Change()
         m_LedgerFormUtil.FillCombo cmbState, mCtx.Stock.StatesWithStock(bucket, id)
     End If
 
-    ' 充当先候補 = 同品番の有効ロット (充当元自身は除く)
+    ' 充当先候補 = 同品番 (localId) の有効ロット (充当元自身は除く)
     If CurrentEvent() = m_LedgerCore.EV_ALLOCATE Then
         cmbTargetLot.Clear
         Set mTargetLots = New Collection
         Dim lt As c_LotInfo
         For Each lt In mCtx.Lots
-            If lt.PlanStatus = "有効" And lt.ItemNo = mTargetItems(idx) _
+            If lt.PlanStatus = "有効" And lt.LocalId = mTargetLocals(idx) _
                And lt.LotId <> mTargetLotIds(idx) Then
                 mTargetLots.Add lt
                 cmbTargetLot.AddItem lt.LotId & "  (必要 " & lt.Required & ")"
@@ -142,7 +142,7 @@ Private Sub cmbState_Change()
     If mTargetLotIds(idx) <> "" Then
         avail = mCtx.Stock.AvailableQty("L", mTargetLotIds(idx), cmbState.Text)
     Else
-        avail = mCtx.Stock.AvailableQty("U", mTargetItems(idx), cmbState.Text)
+        avail = mCtx.Stock.AvailableQty("U", mTargetLocals(idx), cmbState.Text)
     End If
     lblStock.Caption = "可用 " & avail & " 個"
 End Sub
@@ -165,7 +165,7 @@ Private Sub btnOK_Click()
     op.Kind = LedgerOpKind.opException
     op.EventKind = CurrentEvent()
     op.LotId = mTargetLotIds(idx)
-    op.ItemNo = mTargetItems(idx)
+    op.LocalId = mTargetLocals(idx)
     op.FromState = cmbState.Text
     op.Qty = CLng(txtQty.Text)
     op.ActionDate = CDate(txtDate.Text)

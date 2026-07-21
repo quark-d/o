@@ -3,12 +3,20 @@ Option Explicit
 '==============================================================================
 ' 搬入ダイアログ (品番プールへの搬入。ロット指定なし)
 '
+' 品番の指定は localId / 品番 / 品名 の 3 欄連動:
+'   - どれか 1 欄を入力 (または選択) すると残り 2 欄が自動表示される
+'   - M_品番 にない値のまま欄を離れると他欄に「!」を表示し、再入力/キャンセルを促す
+'   - 品名が複数の品番に一致する場合は候補から番号で選択させる
+'
 ' コントロールは build_xlsm.ps1 がデザイン時に生成する:
-'   cmbItem / lblPool / txtQty / txtDate / cmbRecorder / txtNote / btnOK / btnCancel
+'   cmbLocalId / cmbItemNo / cmbItemName / lblPool / txtQty / txtDate /
+'   cmbRecorder / txtNote / btnOK / btnCancel
 '==============================================================================
 
 Public Result As c_LedgerDialogResult
 Private mCtx As c_DialogContext
+Private mSelected As c_ItemInfo    ' 確定済みのマスタ行 (未確定は Nothing)
+Private mUpdating As Boolean       ' 3 欄へのプログラム反映中 (Change の再入防止)
 
 Private Sub UserForm_Initialize()
     Set Result = New c_LedgerDialogResult
@@ -17,31 +25,147 @@ End Sub
 
 Public Sub InitDialog(ByVal ctx As c_DialogContext)
     Set mCtx = ctx
-    Me.Caption = "搬入 (倉庫A → 倉庫B)"
+    Me.Caption = "搬入 (" & ctx.WarehouseA & " → " & ctx.WarehouseB & ")"
 
     Dim it As c_ItemInfo
     For Each it In ctx.Items
-        cmbItem.AddItem it.ItemNo & "  " & it.ItemName
+        cmbLocalId.AddItem it.LocalId
+        cmbItemNo.AddItem it.ItemNo
+        cmbItemName.AddItem it.ItemName
     Next
     m_LedgerFormUtil.FillCommon mCtx, cmbRecorder, txtDate
 End Sub
 
-Private Sub cmbItem_Change()
-    If cmbItem.ListIndex < 0 Then Exit Sub
-    Dim it As c_ItemInfo: Set it = mCtx.Items(cmbItem.ListIndex + 1)
-    lblPool.Caption = "現在の未割当在庫: " & _
-        m_LedgerFormUtil.DescribeStates(mCtx, "U", it.ItemNo)
+'------------------------------------------------------------------------------
+' 3 欄連動
+'------------------------------------------------------------------------------
+Private Sub cmbLocalId_Change()
+    If mUpdating Then Exit Sub
+    ResolveFrom "local"
 End Sub
 
+Private Sub cmbItemNo_Change()
+    If mUpdating Then Exit Sub
+    ResolveFrom "itemNo"
+End Sub
+
+Private Sub cmbItemName_Change()
+    If mUpdating Then Exit Sub
+    ResolveFrom "name"
+End Sub
+
+' 入力値からマスタ行の解決を試み、確定できたら他欄へ反映する
+Private Sub ResolveFrom(ByVal src As String)
+    Set mSelected = Nothing
+    lblPool.Caption = ""
+
+    Dim it As c_ItemInfo
+    Select Case src
+        Case "local"
+            Set it = mCtx.FindItemByLocalId(Trim$(cmbLocalId.Text))
+        Case "itemNo"
+            Set it = mCtx.FindItem(Trim$(cmbItemNo.Text))
+        Case "name"
+            ' 一意に決まるときだけ即確定。複数一致は欄を離れるときに候補選択させる
+            Dim cands As Collection
+            Set cands = mCtx.FindItemsByName(Trim$(cmbItemName.Text))
+            If cands.Count = 1 Then Set it = cands(1)
+    End Select
+    If Not it Is Nothing Then ApplyItem it
+End Sub
+
+Private Sub ApplyItem(ByVal it As c_ItemInfo)
+    Set mSelected = it
+    mUpdating = True
+    cmbLocalId.Text = it.LocalId
+    cmbItemNo.Text = it.ItemNo
+    cmbItemName.Text = it.ItemName
+    mUpdating = False
+    lblPool.Caption = "現在の未割当在庫: " & _
+        m_LedgerFormUtil.DescribeStates(mCtx, "U", it.LocalId)
+End Sub
+
+Private Sub ClearItemFields()
+    Set mSelected = Nothing
+    mUpdating = True
+    cmbLocalId.Text = ""
+    cmbItemNo.Text = ""
+    cmbItemName.Text = ""
+    mUpdating = False
+    lblPool.Caption = ""
+End Sub
+
+'------------------------------------------------------------------------------
+' 欄を離れるときの確定チェック (未登録なら「!」+ 再入力/キャンセル)
+'------------------------------------------------------------------------------
+Private Sub cmbLocalId_Exit(ByVal Cancel As MSForms.ReturnBoolean)
+    FieldExit "local", cmbLocalId, "localId", Cancel
+End Sub
+
+Private Sub cmbItemNo_Exit(ByVal Cancel As MSForms.ReturnBoolean)
+    FieldExit "itemNo", cmbItemNo, "品番", Cancel
+End Sub
+
+Private Sub cmbItemName_Exit(ByVal Cancel As MSForms.ReturnBoolean)
+    FieldExit "name", cmbItemName, "品名", Cancel
+End Sub
+
+Private Sub FieldExit(ByVal src As String, ByVal cmb As MSForms.ComboBox, _
+                      ByVal fieldCaption As String, ByVal Cancel As MSForms.ReturnBoolean)
+    Dim txt As String: txt = Trim$(cmb.Text)
+    If txt = "" Or txt = "!" Then Exit Sub
+    If Not mSelected Is Nothing Then Exit Sub    ' Change で解決済み
+
+    ' 品名の複数一致 → 候補選択
+    If src = "name" Then
+        Dim cands As Collection: Set cands = mCtx.FindItemsByName(txt)
+        If cands.Count > 1 Then
+            Dim pick As c_ItemInfo
+            Set pick = m_LedgerFormUtil.PickItemFromCandidates(cands)
+            If pick Is Nothing Then
+                Cancel = True    ' 選択されなかったので欄に留まる
+            Else
+                ApplyItem pick
+            End If
+            Exit Sub
+        End If
+    End If
+
+    ' 未登録 → 他欄に「!」を表示して再入力かキャンセルを促す
+    mUpdating = True
+    If src <> "local" Then cmbLocalId.Text = "!"
+    If src <> "itemNo" Then cmbItemNo.Text = "!"
+    If src <> "name" Then cmbItemName.Text = "!"
+    mUpdating = False
+
+    If MsgBox("入力された" & fieldCaption & "「" & txt & "」は M_品番 にありません。" & vbCrLf & _
+              "再入力しますか? (キャンセル = 入力をクリア)", _
+              vbRetryCancel + vbExclamation, "未登録の" & fieldCaption) = vbRetry Then
+        mUpdating = True
+        If src <> "local" Then cmbLocalId.Text = ""
+        If src <> "itemNo" Then cmbItemNo.Text = ""
+        If src <> "name" Then cmbItemName.Text = ""
+        mUpdating = False
+        Cancel = True    ' 欄に留まって再入力
+    Else
+        ClearItemFields
+    End If
+End Sub
+
+'------------------------------------------------------------------------------
+' OK / キャンセル
+'------------------------------------------------------------------------------
 Private Sub btnOK_Click()
-    If cmbItem.ListIndex < 0 Then
-        MsgBox "品番を選択してください。", vbExclamation: Exit Sub
+    If mSelected Is Nothing Then
+        MsgBox "localId / 品番 / 品名 のいずれかで品番を確定してください。", vbExclamation
+        Exit Sub
     End If
     If Not m_LedgerFormUtil.CheckCommon(txtQty, txtDate, cmbRecorder) Then Exit Sub
 
     Dim op As New c_LedgerOperation
     op.Kind = LedgerOpKind.opCarryIn
-    op.ItemNo = mCtx.Items(cmbItem.ListIndex + 1).ItemNo
+    op.LocalId = mSelected.LocalId
+    op.ItemNo = mSelected.ItemNo
     op.Qty = CLng(txtQty.Text)
     op.ActionDate = CDate(txtDate.Text)
     op.Recorder = cmbRecorder.Text

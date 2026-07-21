@@ -16,7 +16,31 @@
 | 搬入 (倉庫A→倉庫B) | 搬入 ×1 (品番プールへ。ロット指定なし) |
 | 工程進行 / 発送 | 工程イベントまたは発送 ×1 (元状態は工程パターンから自動導出) |
 | 不良発生 (+補填) | 不良発生 ×1 + 補填 ON なら充当 ×1 (未割当→当該ロット) |
-| 例外操作 | 廃棄 / 倉庫A戻し / 余剰化 / 充当 ×1 |
+| 例外操作 | 廃棄 / 倉庫戻し / 余剰化 / 充当 ×1 |
+
+### localId (2026-07-21 導入)
+
+- **localId = 社内向けの内部 ID** (M_品番 A 列。接頭辞+連番の文字列。例 `a_001`)。
+  **品番 = 対外向けの 8 桁番号**。台帳・計画・在庫集計のキーはすべて localId。
+  ロットID も `localId_出荷週(_納期先)`。
+- 搬入画面の品番指定は **localId / 品番 / 品名 の 3 欄連動**: どれか 1 欄を入力
+  (または選択) すると残り 2 欄が自動表示。M_品番 にない値のまま欄を離れると他欄に
+  「!」を表示し、再入力かキャンセル (クリア) を促す。品名が複数の品番に一致する
+  場合は候補から選択させる (Forms 版 = 番号入力、PS 版 = リスト選択)。
+- T_台帳 へは localId と品番の両方を書き込む (集計キーは localId、品番は対外記録)。
+
+### 列名ベースの読み書き (2026-07-22 改修)
+
+- VBA はテーブル (tbl_master / tbl_plan / tbl_ledger) と V_在庫内訳・M_リスト を
+  **列名で読み書き**する (列の位置に依存しない)。任意の列をどの位置に追加しても、
+  既存列の**名前を変えない限り**動作する。列名は `m_LedgerCore` 冒頭の定数
+  (`MCOL_*` / `PCOL_*` / `LCOL_*` / `VCOL_*` / `LISTCOL_*`) で一元管理しており、
+  ヘッダー名を変える場合はここも合わせる (不一致は起動時に列名入りのエラーで通知)。
+- V_在庫内訳は 2 セクション (ロット別 / 未割当) それぞれのヘッダー行を読んで列を
+  解決する。状態リストの正は M_リスト「状態」列。
+- V_ シートにはオートフィルターを設定済み。**フィルターで行を絞った状態でも動作に
+  影響しない** (非表示行も VBA は値を読める)。シート保護は AllowFiltering 付きで
+  掛けるため、保護中もフィルター操作が可能。保存時に V_ シートの列幅を自動調整する。
 
 「充当」「余剰化」は通常操作としては見せず、不良補填などの操作から自動生成する。
 搬入時の割当行自動生成 (2026-07-15 決定) は **V_ シートの数式変更が前提のため今回は
@@ -61,6 +85,10 @@
 
 1. 「設定」シートで台帳パスを確認 (既定: E:\LocalAppsWorks\InventoryManager\在庫管理台帳.xlsx)。
    Forms の画面が DPI で縮小される PC では「UI 実装」を `PowerShell` に切り替える。
+   **倉庫Aの表示名 / 倉庫Bの表示名** もここで変更できる (搬入ダイアログの表題
+   「搬入 (倉庫A → 倉庫B)」に反映)。イベント種類「倉庫戻し」は
+   「元の倉庫へ戻す」という抽象名のため、倉庫名を変えても影響しない
+   (2026-07-22 に「倉庫A戻し」から改名。台帳・V_ 数式・M_リストも置換済み)。
 2. 「操作」シートのボタンから入力。流れ:
    **ボタン → (台帳を開く・ReadOnly 検知 → 再計算 → 選択肢スナップショット) →
    ダイアログ → 検証 → 確認 → 書込 → 再計算 → 負在庫チェック → 保護 → 保存**
@@ -76,7 +104,7 @@
   警告し、その場で書込行を削除して取り消せる。既知のサンプル不整合
   (T_台帳 4〜7 行目によるロットA 未処理 −3) は「既存の負」として除外される。
 
-## JSON スキーマ (schemaVersion 1.0)
+## JSON スキーマ (schemaVersion 1.2)
 
 受け渡しファイルの既定: `%TEMP%\ledger_dialog_in.json` / `ledger_dialog_out.json`
 (UTF-8 BOM 付き。`PsLedgerEventDialog` のプロパティまたは設定シートの
@@ -87,20 +115,22 @@
 
 | キー | 説明 |
 |---|---|
-| `schemaVersion` | "1.0" |
+| `schemaVersion` | "1.2" |
 | `dialog` | `carryIn` / `progress` / `defect` / `exception` (表示する画面) |
 | `defaults.actionDate` / `defaults.recorder` | 既定値 (日付は `yyyy-MM-dd`) |
+| `labels.warehouseA` / `labels.warehouseB` | 倉庫の表示名 (搬入ダイアログの表題用。省略時 倉庫A/倉庫B) |
 | `recorders` / `states` | 記録者リスト / 状態リスト (表示順) |
-| `items[]` | `itemNo` / `itemName` / `pattern` (1〜4) |
-| `lots[]` | `lotId` / `itemNo` / `shipWeek` / `dest` / `required` / `planStatus` (キャンセル含む全ロット) |
+| `items[]` | `localId` / `itemNo` / `itemName` / `pattern` (1〜4) |
+| `lots[]` | `lotId` / `localId` / `itemNo` / `shipWeek` / `dest` / `required` / `planStatus` (キャンセル含む全ロット) |
 | `stock.lots[]` | `lotId` + `byState` (非ゼロ状態のみ。負もあり得る) |
-| `stock.unallocated[]` | `itemNo` + `byState` (同上) |
+| `stock.unallocated[]` | `localId` + `byState` (同上) |
 
 ### 出力 (PS → Excel): 操作結果
 
 `status` (`ok`/`cancel`/`error`) + `message` + `operation` (全キー常時出力):
-`kind` / `eventKind` / `itemNo` / `lotId` / `fromState` / `qty` / `actionDate` /
-`recorder` / `note` / `refill` / `refillFromState` / `refillQty` / `targetLotId`
+`kind` / `eventKind` / `localId` / `itemNo` / `lotId` / `fromState` / `qty` /
+`actionDate` / `recorder` / `note` / `refill` / `refillFromState` / `refillQty` /
+`targetLotId`
 
 **運ぶのは操作レベルのみ。** 台帳行への展開と正の検証は VBA 側 LedgerCore が行う
 (PS 側の上限制御は入力ガイド)。
@@ -146,7 +176,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File Show-LedgerDialog.p
 
 ## 検証ルール (LedgerCore.ValidateOperation)
 
-- **エラー (書込拒否)**: 数量 < 1 / 記録者未選択 / 品番・ロット不明 /
+- **エラー (書込拒否)**: 数量 < 1 / 記録者未選択 / localId・ロット不明 /
   キャンセルロットへの工程進行・不良・充当 / 工程パターン外イベント /
   補填数量 > 不良数量 / **在庫負防止** (展開行をスナップショットに順次適用し、
   消費が可用量を超えたら拒否。既に負のバケットは可用 0 扱い)

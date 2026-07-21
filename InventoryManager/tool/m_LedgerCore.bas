@@ -17,7 +17,7 @@ Public Enum LedgerOpKind
     opCarryIn = 1       ' 搬入
     opProgress = 2      ' 工程進行 (発送含む)
     opDefect = 3        ' 不良+補填
-    opException = 4     ' 例外操作 (廃棄/倉庫A戻し/余剰化/充当)
+    opException = 4     ' 例外操作 (廃棄/倉庫戻し/余剰化/充当)
 End Enum
 
 ' シート保護のパスワード (事故防止用。変更する場合はここを書き換えて再ビルド)
@@ -29,13 +29,52 @@ Public Const SH_PLAN As String = "T_納期計画"
 Public Const SH_MASTER As String = "M_品番"
 Public Const SH_LIST As String = "M_リスト"
 Public Const SH_STOCK As String = "V_在庫内訳"
+Public Const SH_CHECK As String = "V_充足確認"
+
+' 列名 (ブックのヘッダーと一致させること。読み書きはすべて列名で行い、列の位置には依存しない)
+' M_品番 (tbl_master)
+Public Const MCOL_LOCALID As String = "localId"
+Public Const MCOL_ITEMNO As String = "品番"
+Public Const MCOL_ITEMNAME As String = "品名"
+Public Const MCOL_PATTERN As String = "工程パターン"
+' T_納期計画 (tbl_plan)
+Public Const PCOL_LOTID As String = "ロットID"
+Public Const PCOL_LOCALID As String = "localId"
+Public Const PCOL_ITEMNO As String = "品番"
+Public Const PCOL_SHIPWEEK As String = "出荷週"
+Public Const PCOL_DEST As String = "納期先"
+Public Const PCOL_REQUIRED As String = "必要数"
+Public Const PCOL_STATUS As String = "計画状態"
+' T_台帳 (tbl_ledger)
+Public Const LCOL_NO As String = "No"
+Public Const LCOL_DATE As String = "実施日"
+Public Const LCOL_EVENT As String = "イベント種類"
+Public Const LCOL_LOCALID As String = "localId"
+Public Const LCOL_ITEMNO As String = "品番"
+Public Const LCOL_LOTID As String = "ロットID"
+Public Const LCOL_TARGETLOT As String = "充当先ロットID"
+Public Const LCOL_FROMSTATE As String = "元状態"
+Public Const LCOL_QTY As String = "数量"
+Public Const LCOL_DEST As String = "納期先"
+Public Const LCOL_RECORDER As String = "記録者"
+Public Const LCOL_NOTE As String = "備考"
+' V_在庫内訳 (両セクションのヘッダー行)
+Public Const VCOL_KIND As String = "区分"
+Public Const VCOL_LOTID As String = "ロットID"
+Public Const VCOL_LOCALID As String = "localId"
+Public Const VCOL_TOTAL As String = "合計"
+Public Const VKIND_LOT As String = "ロット"
+Public Const VKIND_UNALLOC As String = "未割当"
+' M_リスト
+Public Const LISTCOL_STATE As String = "状態"
+Public Const LISTCOL_RECORDER As String = "記録者"
 
 ' イベント種類 (M_リスト A列と一致させること)
 Public Const EV_CARRYIN As String = "搬入"
 Public Const EV_SHIP As String = "発送"
 Public Const EV_DEFECT As String = "不良発生"
 Public Const EV_DISCARD As String = "廃棄"
-Public Const EV_RETURN As String = "倉庫A戻し"
+Public Const EV_RETURN As String = "倉庫戻し"   ' 元の倉庫へ戻す (抽象名。2026-07-22 改名)
 Public Const EV_SURPLUS As String = "余剰化"
 Public Const EV_ALLOCATE As String = "充当"
 
@@ -138,67 +177,96 @@ End Function
 ' c_DialogContext の構築
 '
 ' 呼び出し前に Application.CalculateFullRebuild を済ませておくこと。
+' 列はすべて列名 (定数) で引くため、列の追加・並べ替えに影響されない。
 '==============================================================================
 Public Function BuildDialogContext(ByVal wb As Workbook) As c_DialogContext
     Dim ctx As New c_DialogContext
 
     ' --- M_品番 ---
     Dim lo As ListObject: Set lo = wb.Worksheets(SH_MASTER).ListObjects("tbl_master")
+    Dim mLocal As Long: mLocal = TblCol(lo, MCOL_LOCALID)
+    Dim mItemNo As Long: mItemNo = TblCol(lo, MCOL_ITEMNO)
+    Dim mName As Long: mName = TblCol(lo, MCOL_ITEMNAME)
+    Dim mPattern As Long: mPattern = TblCol(lo, MCOL_PATTERN)
     Dim r As ListRow
     For Each r In lo.ListRows
-        If Trim$(CStr(r.Range(1).Value & "")) <> "" Then
+        If Trim$(CStr(r.Range(mLocal).Value & "")) <> "" Then
             Dim it As c_ItemInfo: Set it = New c_ItemInfo
-            it.ItemNo = CStr(r.Range(1).Value)
-            it.ItemName = CStr(r.Range(2).Value & "")
-            it.Pattern = CLng(Val(r.Range(3).Value & ""))
+            it.LocalId = CStr(r.Range(mLocal).Value)
+            it.ItemNo = CStr(r.Range(mItemNo).Value & "")
+            it.ItemName = CStr(r.Range(mName).Value & "")
+            it.Pattern = CLng(Val(r.Range(mPattern).Value & ""))
             ctx.Items.Add it
         End If
     Next
 
     ' --- T_納期計画 (キャンセル含む全行。UI 側で用途に応じて絞る) ---
     Set lo = wb.Worksheets(SH_PLAN).ListObjects("tbl_plan")
+    Dim pLot As Long: pLot = TblCol(lo, PCOL_LOTID)
+    Dim pLocal As Long: pLocal = TblCol(lo, PCOL_LOCALID)
+    Dim pItemNo As Long: pItemNo = TblCol(lo, PCOL_ITEMNO)
+    Dim pWeek As Long: pWeek = TblCol(lo, PCOL_SHIPWEEK)
+    Dim pDest As Long: pDest = TblCol(lo, PCOL_DEST)
+    Dim pReq As Long: pReq = TblCol(lo, PCOL_REQUIRED)
+    Dim pStatus As Long: pStatus = TblCol(lo, PCOL_STATUS)
     For Each r In lo.ListRows
-        If Trim$(CStr(r.Range(1).Value & "")) <> "" Then
+        If Trim$(CStr(r.Range(pLot).Value & "")) <> "" Then
             Dim lt As c_LotInfo: Set lt = New c_LotInfo
-            lt.LotId = CStr(r.Range(1).Value)
-            lt.ItemNo = CStr(r.Range(2).Value & "")
-            lt.ShipWeek = CDate(r.Range(3).Value)
-            lt.Dest = CStr(r.Range(4).Value & "")
-            lt.Required = CLng(Val(r.Range(5).Value & ""))
-            lt.PlanStatus = CStr(r.Range(6).Value & "")
+            lt.LotId = CStr(r.Range(pLot).Value)
+            lt.LocalId = CStr(r.Range(pLocal).Value & "")
+            lt.ItemNo = CStr(r.Range(pItemNo).Value & "")
+            lt.ShipWeek = CDate(r.Range(pWeek).Value)
+            lt.Dest = CStr(r.Range(pDest).Value & "")
+            lt.Required = CLng(Val(r.Range(pReq).Value & ""))
+            lt.PlanStatus = CStr(r.Range(pStatus).Value & "")
             ctx.Lots.Add lt
         End If
     Next
 
-    ' --- V_在庫内訳 → 状態リスト + c_StockSnapshot ---
-    Dim ws As Worksheet: Set ws = wb.Worksheets(SH_STOCK)
-    ' ヘッダ D1～: 「合計」の手前までが状態列
-    Dim col As Long: col = 4
-    Do While CStr(ws.Cells(1, col).Value & "") <> "" And _
-             CStr(ws.Cells(1, col).Value & "") <> "合計"
-        ctx.States.Add CStr(ws.Cells(1, col).Value)
-        col = col + 1
+    ' --- M_リスト (状態リスト・記録者。1 行目のヘッダーで列を引く) ---
+    Dim ws As Worksheet: Set ws = wb.Worksheets(SH_LIST)
+    Dim listMap As Object: Set listMap = HeaderMap(ws, 1)
+    Dim rowNo As Long
+    Dim stCol As Long: stCol = MapCol(listMap, ws, 1, LISTCOL_STATE)
+    rowNo = 2
+    Do While CStr(ws.Cells(rowNo, stCol).Value & "") <> ""
+        ctx.States.Add CStr(ws.Cells(rowNo, stCol).Value)
+        rowNo = rowNo + 1
+    Loop
+    Dim recCol As Long: recCol = MapCol(listMap, ws, 1, LISTCOL_RECORDER)
+    rowNo = 2
+    Do While CStr(ws.Cells(rowNo, recCol).Value & "") <> ""
+        ctx.Recorders.Add CStr(ws.Cells(rowNo, recCol).Value)
+        rowNo = rowNo + 1
     Loop
 
+    ' --- V_在庫内訳 → c_StockSnapshot (各セクションのヘッダー行で列を引く) ---
+    Set ws = wb.Worksheets(SH_STOCK)
     Dim snap As New c_StockSnapshot
     snap.Init ctx.States
 
-    Dim rowNo As Long
+    Dim kindCol As Long, lotCol As Long, localCol As Long
+    Dim stateCols() As Long
+    ResolveStockColumns ws, 1, ctx.States, kindCol, lotCol, localCol, stateCols
+
     Dim kindCell As String
-    Dim lastRow As Long: lastRow = ws.Cells(ws.Rows.Count, 3).End(xlUp).Row   ' C列 (品番) 基準
-    For rowNo = 2 To lastRow
-        kindCell = CStr(ws.Cells(rowNo, 1).Value & "")
-        If kindCell = "ロット" Or kindCell = "未割当" Then
+    Dim bottom As Long: bottom = ws.UsedRange.Row + ws.UsedRange.Rows.Count - 1
+    For rowNo = 2 To bottom
+        kindCell = CStr(ws.Cells(rowNo, kindCol).Value & "")
+        If kindCell = VCOL_KIND Then
+            ' 2 つ目 (未割当) のセクションのヘッダー行 → 列を引き直す
+            ResolveStockColumns ws, rowNo, ctx.States, kindCol, lotCol, localCol, stateCols
+        ElseIf kindCell = VKIND_LOT Or kindCell = VKIND_UNALLOC Then
             Dim stIdx As Long
             Dim q As Long
             For stIdx = 1 To ctx.States.Count
-                q = CLng(Val(ws.Cells(rowNo, 3 + stIdx).Value & ""))
+                q = CLng(Val(ws.Cells(rowNo, stateCols(stIdx)).Value & ""))
                 If q <> 0 Then
-                    If kindCell = "ロット" Then
-                        snap.SetLotQty CStr(ws.Cells(rowNo, 2).Value & ""), _
+                    If kindCell = VKIND_LOT Then
+                        snap.SetLotQty CStr(ws.Cells(rowNo, lotCol).Value & ""), _
                                        ctx.States(stIdx), q
                     Else
-                        snap.SetUnallocQty CStr(ws.Cells(rowNo, 3).Value & ""), _
+                        snap.SetUnallocQty CStr(ws.Cells(rowNo, localCol).Value & ""), _
                                            ctx.States(stIdx), q
                     End If
                 End If
@@ -206,14 +274,6 @@ Public Function BuildDialogContext(ByVal wb As Workbook) As c_DialogContext
         End If
     Next
     Set ctx.Stock = snap
-
-    ' --- M_リスト G列 (記録者) ---
-    Set ws = wb.Worksheets(SH_LIST)
-    rowNo = 2
-    Do While CStr(ws.Cells(rowNo, 7).Value & "") <> ""
-        ctx.Recorders.Add CStr(ws.Cells(rowNo, 7).Value)
-        rowNo = rowNo + 1
-    Loop
 
     ' --- 既定値 ---
     ctx.DefaultActionDate = Date
@@ -229,6 +289,61 @@ End Function
 ' 書込成功後に呼ぶ (次回の既定記録者を記憶)
 Public Sub SaveLastRecorder(ByVal recorder As String)
     SaveSetting "LedgerTool", "UI", "LastRecorder", recorder
+End Sub
+
+'==============================================================================
+' 列名 → 列位置の解決 (列の追加・並べ替えに耐えるため、位置は名前から都度引く)
+'==============================================================================
+
+' テーブル列の位置を列名で引く (無ければ分かりやすいエラー)
+Private Function TblCol(ByVal lo As ListObject, ByVal colName As String) As Long
+    On Error GoTo Fail
+    TblCol = lo.ListColumns(colName).Index
+    Exit Function
+Fail:
+    Err.Raise vbObjectError + 20, , _
+        "テーブル " & lo.Name & " に列「" & colName & "」がありません。" & _
+        "列名を変更した場合は m_LedgerCore の列名定数も合わせてください。"
+End Function
+
+' シートの指定行をヘッダーとして 列名→列番号 の辞書を作る (重複時は左を優先)
+Private Function HeaderMap(ByVal ws As Worksheet, ByVal headerRow As Long) As Object
+    Dim map As Object: Set map = CreateObject("Scripting.Dictionary")
+    Dim lastCol As Long: lastCol = ws.Cells(headerRow, ws.Columns.Count).End(xlToLeft).Column
+    Dim col As Long
+    Dim h As String
+    For col = 1 To lastCol
+        h = Trim$(CStr(ws.Cells(headerRow, col).Value & ""))
+        If h <> "" And Not map.Exists(h) Then map(h) = col
+    Next
+    Set HeaderMap = map
+End Function
+
+Private Function MapCol(ByVal map As Object, ByVal ws As Worksheet, _
+                        ByVal headerRow As Long, ByVal colName As String) As Long
+    If Not map.Exists(colName) Then
+        Err.Raise vbObjectError + 21, , _
+            ws.Name & " の " & headerRow & " 行目に列「" & colName & "」が見つかりません。"
+    End If
+    MapCol = map(colName)
+End Function
+
+' V_在庫内訳のセクションヘッダー行から 区分/ロットID/localId/各状態 の列位置を引く
+' (未割当セクションにはロットID列が無いため lotCol のみ任意)
+Private Sub ResolveStockColumns(ByVal ws As Worksheet, ByVal headerRow As Long, _
+                                ByVal states As Collection, ByRef kindCol As Long, _
+                                ByRef lotCol As Long, ByRef localCol As Long, _
+                                ByRef stateCols() As Long)
+    Dim map As Object: Set map = HeaderMap(ws, headerRow)
+    kindCol = MapCol(map, ws, headerRow, VCOL_KIND)
+    lotCol = 0
+    If map.Exists(VCOL_LOTID) Then lotCol = map(VCOL_LOTID)
+    localCol = MapCol(map, ws, headerRow, VCOL_LOCALID)
+    ReDim stateCols(1 To states.Count)
+    Dim i As Long
+    For i = 1 To states.Count
+        stateCols(i) = MapCol(map, ws, headerRow, CStr(states(i)))
+    Next
 End Sub
 
 '==============================================================================
@@ -262,8 +377,11 @@ Public Function ValidateOperation(ByVal op As c_LedgerOperation, _
             op.EventKind = EV_CARRYIN
             op.LotId = ""
             op.FromState = ""
-            If ctx.FindItem(op.ItemNo) Is Nothing Then
-                errs.Add "品番が M_品番 にありません: " & op.ItemNo
+            Set it = ctx.FindItemByLocalId(op.LocalId)
+            If it Is Nothing Then
+                errs.Add "localId が M_品番 にありません: " & op.LocalId
+            Else
+                op.ItemNo = it.ItemNo
             End If
 
         Case LedgerOpKind.opProgress
@@ -274,15 +392,17 @@ Public Function ValidateOperation(ByVal op As c_LedgerOperation, _
                 errs.Add "キャンセルされたロットには工程進行を記録できません" & _
                          " (例外操作で対応してください): " & op.LotId
             Else
+                op.LocalId = lt.LocalId
                 op.ItemNo = lt.ItemNo
-                Set it = ctx.FindItem(lt.ItemNo)
+                Set it = ctx.FindItemByLocalId(lt.LocalId)
                 If it Is Nothing Then
-                    errs.Add "ロットの品番が M_品番 にありません: " & lt.ItemNo
+                    errs.Add "ロットの localId が M_品番 にありません: " & lt.LocalId
                 Else
                     op.FromState = m_LedgerCore.DeriveFromState(it.Pattern, op.EventKind)
                     If op.FromState = "" Then
-                        errs.Add "イベント「" & op.EventKind & "」は品番 " & it.ItemNo & _
-                                 " の工程パターン " & it.Pattern & " では使用できません。"
+                        errs.Add "イベント「" & op.EventKind & "」は " & it.LocalId & _
+                                 " (品番 " & it.ItemNo & ") の工程パターン " & it.Pattern & _
+                                 " では使用できません。"
                     End If
                 End If
             End If
@@ -295,6 +415,7 @@ Public Function ValidateOperation(ByVal op As c_LedgerOperation, _
             ElseIf lt.PlanStatus <> "有効" Then
                 errs.Add "キャンセルされたロットには不良発生を記録できません: " & op.LotId
             Else
+                op.LocalId = lt.LocalId
                 op.ItemNo = lt.ItemNo
             End If
             If Trim$(op.FromState) = "" Then errs.Add "不良になった在庫の元状態を選択してください。"
@@ -337,8 +458,8 @@ Public Function ValidateOperation(ByVal op As c_LedgerOperation, _
                         errs.Add "キャンセルされたロットへは充当できません: " & op.TargetLotId
                     ElseIf op.TargetLotId = op.LotId Then
                         errs.Add "充当元と充当先が同じロットです。"
-                    ElseIf op.ItemNo <> "" And lt.ItemNo <> op.ItemNo Then
-                        errs.Add "充当元と充当先の品番が一致しません。"
+                    ElseIf op.LocalId <> "" And lt.LocalId <> op.LocalId Then
+                        errs.Add "充当元と充当先の品番 (localId) が一致しません。"
                     End If
                 Case Else
                     errs.Add "不明な例外操作です: " & op.EventKind
@@ -357,7 +478,7 @@ Public Function ValidateOperation(ByVal op As c_LedgerOperation, _
     ValidateOperation = (errs.Count = 0)
 End Function
 
-' 例外操作の対象 (ロット or 未割当) の存在チェック。ItemNo の補完も行う
+' 例外操作の対象 (ロット or 未割当) の存在チェック。LocalId/ItemNo の補完も行う
 Private Sub ValidateExceptionTarget(ByVal op As c_LedgerOperation, _
                                     ByVal ctx As c_DialogContext, _
                                     ByRef errs As Collection, _
@@ -367,14 +488,18 @@ Private Sub ValidateExceptionTarget(ByVal op As c_LedgerOperation, _
         If lt Is Nothing Then
             errs.Add "ロットが T_納期計画 にありません: " & op.LotId
         Else
+            op.LocalId = lt.LocalId
             op.ItemNo = lt.ItemNo
             If requireActiveLot And lt.PlanStatus <> "有効" Then
                 errs.Add "キャンセルされたロットは対象にできません: " & op.LotId
             End If
         End If
     Else
-        If ctx.FindItem(op.ItemNo) Is Nothing Then
-            errs.Add "未割当在庫の品番が M_品番 にありません: " & op.ItemNo
+        Dim it As c_ItemInfo: Set it = ctx.FindItemByLocalId(op.LocalId)
+        If it Is Nothing Then
+            errs.Add "未割当在庫の localId が M_品番 にありません: " & op.LocalId
+        Else
+            op.ItemNo = it.ItemNo
         End If
     End If
 End Sub
@@ -382,9 +507,9 @@ End Sub
 '==============================================================================
 ' 操作 → 台帳行への展開
 '
-' 1 行 = Variant 配列 (0～9):
-'   (0)実施日 (1)イベント種類 (2)品番 (3)ロットID (4)充当先ロットID
-'   (5)元状態 (6)数量 (7)納期先 (8)記録者 (9)備考
+' 1 行 = Variant 配列 (0～10):
+'   (0)実施日 (1)イベント種類 (2)localId (3)品番 (4)ロットID (5)充当先ロットID
+'   (6)元状態 (7)数量 (8)納期先 (9)記録者 (10)備考
 ' No 列は書込時に採番する。
 '==============================================================================
 Public Function ExpandOperation(ByVal op As c_LedgerOperation, _
@@ -394,7 +519,7 @@ Public Function ExpandOperation(ByVal op As c_LedgerOperation, _
 
     Select Case op.Kind
         Case LedgerOpKind.opCarryIn
-            rows.Add MakeRow(op.ActionDate, EV_CARRYIN, op.ItemNo, "", "", "", _
+            rows.Add MakeRow(op.ActionDate, EV_CARRYIN, op.LocalId, op.ItemNo, "", "", "", _
                              op.Qty, "", op.Recorder, op.Note)
 
         Case LedgerOpKind.opProgress
@@ -403,21 +528,21 @@ Public Function ExpandOperation(ByVal op As c_LedgerOperation, _
                 Set lt = ctx.FindLot(op.LotId)
                 If Not lt Is Nothing Then dest = lt.Dest
             End If
-            rows.Add MakeRow(op.ActionDate, op.EventKind, op.ItemNo, op.LotId, "", _
+            rows.Add MakeRow(op.ActionDate, op.EventKind, op.LocalId, op.ItemNo, op.LotId, "", _
                              op.FromState, op.Qty, dest, op.Recorder, op.Note)
 
         Case LedgerOpKind.opDefect
-            rows.Add MakeRow(op.ActionDate, EV_DEFECT, op.ItemNo, op.LotId, "", _
+            rows.Add MakeRow(op.ActionDate, EV_DEFECT, op.LocalId, op.ItemNo, op.LotId, "", _
                              op.FromState, op.Qty, "", op.Recorder, op.Note)
             If op.Refill Then
                 ' 補填 = 未割当 → 当該ロットへの充当 (状態維持)
-                rows.Add MakeRow(op.ActionDate, EV_ALLOCATE, op.ItemNo, "", op.LotId, _
+                rows.Add MakeRow(op.ActionDate, EV_ALLOCATE, op.LocalId, op.ItemNo, "", op.LotId, _
                                  op.RefillFromState, op.RefillQty, "", op.Recorder, _
                                  AppendNote(op.Note, "不良補填"))
             End If
 
         Case LedgerOpKind.opException
-            rows.Add MakeRow(op.ActionDate, op.EventKind, op.ItemNo, op.LotId, _
+            rows.Add MakeRow(op.ActionDate, op.EventKind, op.LocalId, op.ItemNo, op.LotId, _
                              op.TargetLotId, op.FromState, op.Qty, "", _
                              op.Recorder, op.Note)
     End Select
@@ -426,11 +551,12 @@ Public Function ExpandOperation(ByVal op As c_LedgerOperation, _
 End Function
 
 Private Function MakeRow(ByVal actionDate As Date, ByVal eventKind As String, _
-                         ByVal itemNo As String, ByVal lotId As String, _
-                         ByVal targetLotId As String, ByVal fromState As String, _
-                         ByVal qty As Long, ByVal dest As String, _
-                         ByVal recorder As String, ByVal note As String) As Variant
-    MakeRow = Array(actionDate, eventKind, itemNo, lotId, targetLotId, fromState, _
+                         ByVal localId As String, ByVal itemNo As String, _
+                         ByVal lotId As String, ByVal targetLotId As String, _
+                         ByVal fromState As String, ByVal qty As Long, _
+                         ByVal dest As String, ByVal recorder As String, _
+                         ByVal note As String) As Variant
+    MakeRow = Array(actionDate, eventKind, localId, itemNo, lotId, targetLotId, fromState, _
                     qty, dest, recorder, note)
 End Function
 
@@ -454,42 +580,42 @@ Public Sub SimulateRows(ByVal rows As Collection, ByVal ctx As c_DialogContext, 
 
     Dim row As Variant
     For Each row In rows
-        Dim eventKind As String, itemNo As String, lotId As String
+        Dim eventKind As String, localId As String, lotId As String
         Dim targetLotId As String, fromState As String
         Dim qty As Long
-        eventKind = row(1): itemNo = row(2): lotId = row(3)
-        targetLotId = row(4): fromState = row(5): qty = row(6)
+        eventKind = row(1): localId = row(2): lotId = row(4)
+        targetLotId = row(5): fromState = row(6): qty = row(7)
 
         ' "種別|ID|" まで組み立て、状態を後ろに連結して使う
         Dim bucket As String
         If lotId <> "" Then
             bucket = "L|" & lotId & "|"
         Else
-            bucket = "U|" & itemNo & "|"
+            bucket = "U|" & localId & "|"
         End If
 
         Select Case eventKind
             Case EV_CARRYIN
                 AddQty dict, bucket & ST_RAW, qty
             Case EV_SHIP, EV_DISCARD, EV_RETURN
-                ConsumeQty dict, bucket & fromState, qty, DescribeBucket(lotId, itemNo), _
+                ConsumeQty dict, bucket & fromState, qty, DescribeBucket(lotId, localId), _
                            fromState, errs
             Case EV_DEFECT
-                ConsumeQty dict, bucket & fromState, qty, DescribeBucket(lotId, itemNo), _
+                ConsumeQty dict, bucket & fromState, qty, DescribeBucket(lotId, localId), _
                            fromState, errs
                 AddQty dict, bucket & ST_DEFECT, qty
             Case EV_SURPLUS
-                ConsumeQty dict, bucket & fromState, qty, DescribeBucket(lotId, itemNo), _
+                ConsumeQty dict, bucket & fromState, qty, DescribeBucket(lotId, localId), _
                            fromState, errs
-                AddQty dict, "U|" & itemNo & "|" & fromState, qty
+                AddQty dict, "U|" & localId & "|" & fromState, qty
             Case EV_ALLOCATE
-                ConsumeQty dict, bucket & fromState, qty, DescribeBucket(lotId, itemNo), _
+                ConsumeQty dict, bucket & fromState, qty, DescribeBucket(lotId, localId), _
                            fromState, errs
                 AddQty dict, "L|" & targetLotId & "|" & fromState, qty
             Case Else
                 ' 工程イベント (開始/完了)
                 Dim toState As String: toState = m_LedgerCore.EventToState(eventKind)
-                ConsumeQty dict, bucket & fromState, qty, DescribeBucket(lotId, itemNo), _
+                ConsumeQty dict, bucket & fromState, qty, DescribeBucket(lotId, localId), _
                            fromState, errs
                 If toState <> "" Then AddQty dict, bucket & toState, qty
         End Select
@@ -521,11 +647,11 @@ Private Sub ConsumeQty(ByVal dict As Object, ByVal key As String, ByVal qty As L
     End If
 End Sub
 
-Private Function DescribeBucket(ByVal lotId As String, ByVal itemNo As String) As String
+Private Function DescribeBucket(ByVal lotId As String, ByVal localId As String) As String
     If lotId <> "" Then
         DescribeBucket = "ロット " & lotId
     Else
-        DescribeBucket = "未割当 (" & itemNo & ")"
+        DescribeBucket = "未割当 (" & localId & ")"
     End If
 End Function
 
@@ -548,21 +674,37 @@ Public Function WriteOperation(ByVal wb As Workbook, ByVal rows As Collection, _
 
     Dim nextNo As Long: nextNo = MaxLedgerNo(lo) + 1
 
+    ' 列位置は列名で解決する (列の追加・並べ替えに耐える)
+    ' (変数名に cDate を使うと VBA の変換関数 CDate と衝突するため cActDate)
+    Dim cNo As Long: cNo = TblCol(lo, LCOL_NO)
+    Dim cActDate As Long: cActDate = TblCol(lo, LCOL_DATE)
+    Dim cEvent As Long: cEvent = TblCol(lo, LCOL_EVENT)
+    Dim cLocal As Long: cLocal = TblCol(lo, LCOL_LOCALID)
+    Dim cItemNo As Long: cItemNo = TblCol(lo, LCOL_ITEMNO)
+    Dim cLot As Long: cLot = TblCol(lo, LCOL_LOTID)
+    Dim cTarget As Long: cTarget = TblCol(lo, LCOL_TARGETLOT)
+    Dim cFrom As Long: cFrom = TblCol(lo, LCOL_FROMSTATE)
+    Dim cQty As Long: cQty = TblCol(lo, LCOL_QTY)
+    Dim cDest As Long: cDest = TblCol(lo, LCOL_DEST)
+    Dim cRec As Long: cRec = TblCol(lo, LCOL_RECORDER)
+    Dim cNote As Long: cNote = TblCol(lo, LCOL_NOTE)
+
     Dim addedRows As New Collection
     Dim row As Variant
     For Each row In rows
         Dim lr As ListRow: Set lr = lo.ListRows.Add
-        lr.Range(1).Value = nextNo
-        lr.Range(2).Value = CDate(row(0))
-        SetCell lr, 3, row(1)   ' イベント種類
-        SetCell lr, 4, row(2)   ' 品番
-        SetCell lr, 5, row(3)   ' ロットID
-        SetCell lr, 6, row(4)   ' 充当先ロットID
-        SetCell lr, 7, row(5)   ' 元状態
-        lr.Range(8).Value = row(6)   ' 数量
-        SetCell lr, 9, row(7)   ' 納期先
-        SetCell lr, 10, row(8)  ' 記録者
-        SetCell lr, 11, row(9)  ' 備考
+        lr.Range(cNo).Value = nextNo
+        lr.Range(cActDate).Value = CDate(row(0))
+        SetCell lr, cEvent, row(1)
+        SetCell lr, cLocal, row(2)
+        SetCell lr, cItemNo, row(3)
+        SetCell lr, cLot, row(4)
+        SetCell lr, cTarget, row(5)
+        SetCell lr, cFrom, row(6)
+        lr.Range(cQty).Value = row(7)
+        SetCell lr, cDest, row(8)
+        SetCell lr, cRec, row(9)
+        SetCell lr, cNote, row(10)
         addedNos.Add nextNo
         addedRows.Add lr
         nextNo = nextNo + 1
@@ -588,7 +730,7 @@ Public Function WriteOperation(ByVal wb As Workbook, ByVal rows As Collection, _
         End If
     End If
 
-    ws.Protect PROTECT_PWD
+    ws.Protect Password:=PROTECT_PWD, AllowFiltering:=True
     Set WriteOperation = addedNos
 End Function
 
@@ -599,10 +741,11 @@ End Sub
 
 Private Function MaxLedgerNo(ByVal lo As ListObject) As Long
     Dim maxNo As Long
+    Dim noCol As Long: noCol = TblCol(lo, LCOL_NO)
     Dim r As ListRow
     For Each r In lo.ListRows
-        If IsNumeric(r.Range(1).Value) Then
-            If CLng(r.Range(1).Value) > maxNo Then maxNo = CLng(r.Range(1).Value)
+        If IsNumeric(r.Range(noCol).Value) Then
+            If CLng(r.Range(noCol).Value) > maxNo Then maxNo = CLng(r.Range(noCol).Value)
         End If
     Next
     MaxLedgerNo = maxNo
@@ -631,13 +774,30 @@ End Function
 
 '==============================================================================
 ' シート保護 / 解除 / 保存 (設計合意: 層2+層3)
+'
+' 保護は AllowFiltering 付き (V_ シートのオートフィルターを保護中も使えるように)。
+' 保護前に V_ シートの列幅を自動調整する。
 '==============================================================================
 Public Sub ProtectLedgerBook(ByVal wb As Workbook)
+    m_LedgerCore.AutoFitViewSheets wb
     Dim ws As Worksheet
     For Each ws In wb.Worksheets
-        ws.Protect Password:=PROTECT_PWD
+        ws.Protect Password:=PROTECT_PWD, AllowFiltering:=True
     Next
     wb.Protect Password:=PROTECT_PWD, Structure:=True
+End Sub
+
+' V_ シートの列幅を自動調整する (非表示の作業列は触らない)
+Public Sub AutoFitViewSheets(ByVal wb As Workbook)
+    Dim sheetName As Variant
+    For Each sheetName In Array(SH_CHECK, SH_STOCK)
+        Dim ws As Worksheet: Set ws = wb.Worksheets(CStr(sheetName))
+        ws.Unprotect PROTECT_PWD
+        Dim col As Range
+        For Each col In ws.UsedRange.Columns
+            If Not col.EntireColumn.Hidden Then col.EntireColumn.AutoFit
+        Next
+    Next
 End Sub
 
 Public Sub UnprotectLedgerBook(ByVal wb As Workbook)

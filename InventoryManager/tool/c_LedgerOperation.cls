@@ -19,7 +19,8 @@ Option Explicit
 
 Public Kind As LedgerOpKind        ' 操作種別 (m_LedgerCore.bas の Enum)
 Public EventKind As String         ' イベント種類 (M_リスト A列の値)
-Public ItemNo As String            ' 品番 (搬入・未割当対象のとき。ロット対象なら導出)
+Public LocalId As String           ' localId (内部ID。搬入・未割当対象のとき。ロット対象なら導出)
+Public ItemNo As String            ' 品番 (対外向け。検証時にコアが localId から導出)
 Public LotId As String             ' 対象ロットID (空 = 未割当/品番プール)
 Public FromState As String         ' 元状態 (工程進行はコアが導出して設定)
 Public Qty As Long                 ' 数量

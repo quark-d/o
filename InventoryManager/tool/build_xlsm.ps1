@@ -32,12 +32,13 @@ function Add-Ctl {
     param($Designer, [string]$Type, [string]$Name,
           [double]$L, [double]$T, [double]$W, [double]$H, [string]$Caption = '')
     $progId = switch ($Type) {
-        'label'  { 'Forms.Label.1' }
-        'text'   { 'Forms.TextBox.1' }
-        'combo'  { 'Forms.ComboBox.1' }
-        'check'  { 'Forms.CheckBox.1' }
-        'option' { 'Forms.OptionButton.1' }
-        'button' { 'Forms.CommandButton.1' }
+        'label'     { 'Forms.Label.1' }
+        'text'      { 'Forms.TextBox.1' }
+        'combo'     { 'Forms.ComboBox.1' }
+        'comboedit' { 'Forms.ComboBox.1' }
+        'check'     { 'Forms.CheckBox.1' }
+        'option'    { 'Forms.OptionButton.1' }
+        'button'    { 'Forms.CommandButton.1' }
     }
     $c = $Designer.Controls.Add($progId, $Name, $true)
     $c.Left = $L; $c.Top = $T; $c.Width = $W; $c.Height = $H
@@ -47,9 +48,10 @@ function Add-Ctl {
             $c.WordWrap = $true
             $c.AutoSize = $false
         }
-        'combo'  { $c.Style = 2 }   # fmStyleDropDownList (選択のみ・自由入力不可)
-        'check'  { $c.Caption = $Caption }
-        'option' { $c.Caption = $Caption }
+        'combo'     { $c.Style = 2 }   # fmStyleDropDownList (選択のみ・自由入力不可)
+        'comboedit' { $c.Style = 0 }   # fmStyleDropDownCombo (自由入力可。3欄連動入力用)
+        'check'     { $c.Caption = $Caption }
+        'option'    { $c.Caption = $Caption }
         'button' {
             $c.Caption = $Caption
             if ($Name -eq 'btnOK') { $c.Default = $true }
@@ -136,7 +138,7 @@ try {
     $wsOp.Range('B3').Value2 = '通常の入力は上の 4 つのボタンから。台帳を直接修正するときだけ保護解除を使う。'
 
     $buttons = @(
-        @('搬入 (倉庫A→倉庫B)',        'ShowCarryInDialog',   30, 60),
+        @('搬入 (入庫)',               'ShowCarryInDialog',   30, 60),
         @('工程進行 / 発送',           'ShowProgressDialog',  30, 100),
         @('不良発生 (+補填)',          'ShowDefectDialog',    30, 140),
         @('例外操作 (廃棄・戻し 等)',  'ShowExceptionDialog', 30, 180),
@@ -164,6 +166,10 @@ try {
     $wsCfg.Range('B5').Value2 = ''
     $wsCfg.Range('A6').Value2 = 'JSON フォルダ (空 = %TEMP%)'
     $wsCfg.Range('B6').Value2 = ''
+    $wsCfg.Range('A7').Value2 = '倉庫Aの表示名 (搬入元)'
+    $wsCfg.Range('B7').Value2 = '倉庫A'
+    $wsCfg.Range('A8').Value2 = '倉庫Bの表示名 (搬入先)'
+    $wsCfg.Range('B8').Value2 = '倉庫B'
     $wsCfg.Columns.Item(1).ColumnWidth = 42
     $wsCfg.Columns.Item(2).ColumnWidth = 60
     [void]$wsCfg.Range('B4').Validation.Add(3, 1, 1, 'Forms,PowerShell')   # 3 = xlValidateList
@@ -172,6 +178,8 @@ try {
     [void]$wb.Names.Add('cfgUiKind', '=設定!$B$4')
     [void]$wb.Names.Add('cfgPsScriptPath', '=設定!$B$5')
     [void]$wb.Names.Add('cfgJsonDir', '=設定!$B$6')
+    [void]$wb.Names.Add('cfgWarehouseA', '=設定!$B$7')
+    [void]$wb.Names.Add('cfgWarehouseB', '=設定!$B$8')
 
     #--------------------------------------------------------------------------
     # UserForm 4 画面 (デザイン時コントロール生成)
@@ -181,12 +189,16 @@ try {
     $forms = @{}
     $forms['CarryInForm'] = New-FormComponent $vbp 'CarryInForm' '搬入' {
         param($d)
-        [void](Add-Ctl $d 'label' 'lblItemCap' 12 10 100 12 '品番')
-        [void](Add-Ctl $d 'combo' 'cmbItem' 12 24 316 18)
-        [void](Add-Ctl $d 'label' 'lblPool' 12 46 316 24 '')
-        [void](Add-Ctl $d 'label' 'lblQtyCap' 12 76 100 12 '数量')
-        [void](Add-Ctl $d 'text' 'txtQty' 12 90 100 18)
-        Add-Footer $d 116
+        [void](Add-Ctl $d 'label' 'lblLidCap' 12 10 150 12 'localId (内部ID)')
+        [void](Add-Ctl $d 'comboedit' 'cmbLocalId' 12 24 160 18)
+        [void](Add-Ctl $d 'label' 'lblItemNoCap' 12 46 100 12 '品番')
+        [void](Add-Ctl $d 'comboedit' 'cmbItemNo' 12 60 160 18)
+        [void](Add-Ctl $d 'label' 'lblNameCap' 12 82 100 12 '品名')
+        [void](Add-Ctl $d 'comboedit' 'cmbItemName' 12 96 316 18)
+        [void](Add-Ctl $d 'label' 'lblPool' 12 118 316 24 '')
+        [void](Add-Ctl $d 'label' 'lblQtyCap' 12 148 100 12 '数量')
+        [void](Add-Ctl $d 'text' 'txtQty' 12 162 100 18)
+        Add-Footer $d 188
     }
 
     $forms['ProgressForm'] = New-FormComponent $vbp 'ProgressForm' '工程進行 / 発送' {
@@ -225,7 +237,7 @@ try {
         param($d)
         [void](Add-Ctl $d 'label' 'lblOpCap' 12 10 100 12 '操作')
         [void](Add-Ctl $d 'option' 'optDiscard' 12 24 56 16 '廃棄')
-        [void](Add-Ctl $d 'option' 'optReturn' 76 24 84 16 '倉庫A戻し')
+        [void](Add-Ctl $d 'option' 'optReturn' 76 24 84 16 '倉庫戻し')
         [void](Add-Ctl $d 'option' 'optSurplus' 168 24 64 16 '余剰化')
         [void](Add-Ctl $d 'option' 'optAllocate' 240 24 56 16 '充当')
         [void](Add-Ctl $d 'label' 'lblTgtCap' 12 46 200 12 '対象 (ロット / 未割当)')

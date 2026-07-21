@@ -9,6 +9,8 @@ Option Explicit
 '   cfgUiKind       "Forms" / "PowerShell" (既定 Forms)
 '   cfgPsScriptPath Show-LedgerDialog.ps1 のパス (空 = ツールと同じフォルダ)
 '   cfgJsonDir      受け渡し JSON の置き場所 (空 = %TEMP%)
+'   cfgWarehouseA   倉庫Aの表示名 (既定 "倉庫A"。搬入ダイアログの表題に使用)
+'   cfgWarehouseB   倉庫Bの表示名 (既定 "倉庫B")
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -97,6 +99,8 @@ Public Sub RunLedgerDialog(ByVal kind As LedgerOpKind)
     ' 選択肢スナップショットは必ず再計算後に取る
     Application.CalculateFullRebuild
     Dim ctx As c_DialogContext: Set ctx = m_LedgerCore.BuildDialogContext(wb)
+    ctx.WarehouseA = GetConfig("cfgWarehouseA", ctx.WarehouseA)
+    ctx.WarehouseB = GetConfig("cfgWarehouseB", ctx.WarehouseB)
 
     Dim dlg As c_ILedgerEventDialog: Set dlg = m_LedgerDialogs.CreateLedgerDialog()
 
@@ -229,10 +233,10 @@ Private Function DescribeRows(ByVal rows As Collection) As String
     Dim line As String
     For Each row In rows
         line = "・" & Format$(CDate(row(0)), "yyyy/mm/dd") & "  " & row(1) & "  " & row(2)
-        If CStr(row(3) & "") <> "" Then line = line & "  " & row(3)
-        If CStr(row(4) & "") <> "" Then line = line & " → " & row(4)
-        If CStr(row(5) & "") <> "" Then line = line & "  [" & row(5) & "]"
-        line = line & "  " & row(6) & " 個"
+        If CStr(row(4) & "") <> "" Then line = line & "  " & row(4)
+        If CStr(row(5) & "") <> "" Then line = line & " → " & row(5)
+        If CStr(row(6) & "") <> "" Then line = line & "  [" & row(6) & "]"
+        line = line & "  " & row(7) & " 個"
         DescribeRows = DescribeRows & line & vbCrLf
     Next
 End Function

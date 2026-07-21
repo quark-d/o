@@ -1,12 +1,13 @@
-﻿{
-  "schemaVersion": "1.0",
+{
+  "schemaVersion": "1.2",
   "status": "ok",
   "message": "",
   "operation": {
     "kind": "defect",
     "eventKind": "不良発生",
-    "itemNo": "PN-002",
-    "lotId": "PN-002_2026-07-13_納期先A",
+    "localId": "a_002",
+    "itemNo": "10000002",
+    "lotId": "a_002_2026-07-13_納期先A",
     "fromState": "梱包済み",
     "qty": 2,
     "actionDate": "2026-07-18",

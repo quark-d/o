@@ -64,3 +64,22 @@ Public Sub FillCombo(ByVal cmb As MSForms.ComboBox, ByVal items As Collection)
         cmb.AddItem CStr(v)
     Next
 End Sub
+
+' マスタ行の表示用整形 (localId  品番  品名)
+Public Function DescribeItem(ByVal it As c_ItemInfo) As String
+    DescribeItem = it.LocalId & "  " & it.ItemNo & "  " & it.ItemName
+End Function
+
+' 品名重複時の候補選択 (番号入力)。キャンセル/不正入力は Nothing
+Public Function PickItemFromCandidates(ByVal cands As Collection) As c_ItemInfo
+    Dim msg As String
+    msg = "品名が複数の品番に一致しました。番号で選択してください:" & vbCrLf
+    Dim i As Long
+    For i = 1 To cands.Count
+        msg = msg & i & ": " & m_LedgerFormUtil.DescribeItem(cands(i)) & vbCrLf
+    Next
+    Dim ans As String: ans = InputBox(msg, "候補の選択", "1")
+    If ans = "" Or Not IsNumeric(ans) Then Exit Function
+    If CLng(ans) < 1 Or CLng(ans) > cands.Count Then Exit Function
+    Set PickItemFromCandidates = cands(CLng(ans))
+End Function

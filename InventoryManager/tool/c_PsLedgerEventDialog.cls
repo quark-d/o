@@ -14,12 +14,12 @@ Option Explicit
 '
 ' Show-LedgerDialog.ps1 を同期実行し、UTF-8 (BOM 付き) の JSON ファイルで
 ' データを受け渡す。JSON の生成・解析はこのクラスと m_JsonLite に閉じる。
-' スキーマは README.md の「JSON スキーマ」参照 (schemaVersion 1.0)。
+' スキーマは README.md の「JSON スキーマ」参照 (schemaVersion 1.2)。
 '==============================================================================
 
 Implements c_ILedgerEventDialog
 
-Private Const SCHEMA_VERSION As String = "1.0"
+Private Const SCHEMA_VERSION As String = "1.2"
 
 ' Show-LedgerDialog.ps1 のパス (既定値は Class_Initialize で設定。差し替え可)
 Public ScriptPath As String
@@ -83,6 +83,8 @@ Private Function BuildInputJson(ByVal kind As LedgerOpKind, _
     sb = sb & "  ""defaults"": { ""actionDate"": """ & _
          Format$(ctx.DefaultActionDate, "yyyy-mm-dd") & _
          """, ""recorder"": """ & m_JsonLite.JsonEscape(ctx.DefaultRecorder) & """ }," & vbCrLf
+    sb = sb & "  ""labels"": { ""warehouseA"": """ & m_JsonLite.JsonEscape(ctx.WarehouseA) & _
+         """, ""warehouseB"": """ & m_JsonLite.JsonEscape(ctx.WarehouseB) & """ }," & vbCrLf
     sb = sb & "  ""recorders"": [" & JoinStringArray(ctx.Recorders) & "]," & vbCrLf
     sb = sb & "  ""states"": [" & JoinStringArray(ctx.States) & "]," & vbCrLf
     sb = sb & BuildItemsJson(ctx) & "," & vbCrLf
@@ -117,7 +119,8 @@ Private Function BuildItemsJson(ByVal ctx As c_DialogContext) As String
     Dim it As c_ItemInfo
     For Each it In ctx.Items
         If Right$(sb, 1) = "}" Then sb = sb & ","
-        sb = sb & vbCrLf & "    { ""itemNo"": """ & m_JsonLite.JsonEscape(it.ItemNo) & _
+        sb = sb & vbCrLf & "    { ""localId"": """ & m_JsonLite.JsonEscape(it.LocalId) & _
+             """, ""itemNo"": """ & m_JsonLite.JsonEscape(it.ItemNo) & _
              """, ""itemName"": """ & m_JsonLite.JsonEscape(it.ItemName) & _
              """, ""pattern"": " & it.Pattern & " }"
     Next
@@ -130,6 +133,7 @@ Private Function BuildLotsJson(ByVal ctx As c_DialogContext) As String
     For Each lt In ctx.Lots
         If Right$(sb, 1) = "}" Then sb = sb & ","
         sb = sb & vbCrLf & "    { ""lotId"": """ & m_JsonLite.JsonEscape(lt.LotId) & _
+             """, ""localId"": """ & m_JsonLite.JsonEscape(lt.LocalId) & _
              """, ""itemNo"": """ & m_JsonLite.JsonEscape(lt.ItemNo) & _
              """, ""shipWeek"": """ & Format$(lt.ShipWeek, "yyyy-mm-dd") & _
              """, ""dest"": """ & m_JsonLite.JsonEscape(lt.Dest) & _
@@ -156,10 +160,10 @@ Private Function BuildStockJson(ByVal ctx As c_DialogContext) As String
     Next
     sb = sb & vbCrLf & "    ]," & vbCrLf & "    ""unallocated"": ["
     For Each it In ctx.Items
-        entry = ByStateJson(ctx, "U", it.ItemNo)
+        entry = ByStateJson(ctx, "U", it.LocalId)
         If entry <> "" Then
             If Right$(sb, 1) = "}" Then sb = sb & ","
-            sb = sb & vbCrLf & "      { ""itemNo"": """ & m_JsonLite.JsonEscape(it.ItemNo) & _
+            sb = sb & vbCrLf & "      { ""localId"": """ & m_JsonLite.JsonEscape(it.LocalId) & _
                  """, ""byState"": { " & entry & " } }"
         End If
     Next
@@ -193,6 +197,7 @@ Private Sub ParseOutputJson(ByVal json As String, ByRef result As c_LedgerDialog
             Dim op As New c_LedgerOperation
             op.Kind = KindFromKey(m_JsonLite.JsonExtractString(json, "kind"))
             op.EventKind = m_JsonLite.JsonExtractString(json, "eventKind")
+            op.LocalId = m_JsonLite.JsonExtractString(json, "localId")
             op.ItemNo = m_JsonLite.JsonExtractString(json, "itemNo")
             op.LotId = m_JsonLite.JsonExtractString(json, "lotId")
             op.FromState = m_JsonLite.JsonExtractString(json, "fromState")

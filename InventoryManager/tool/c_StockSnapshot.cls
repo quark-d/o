@@ -10,9 +10,9 @@ Attribute VB_Exposed = False
 Option Explicit
 
 '==============================================================================
-' V_在庫内訳のスナップショット (ロット×状態 / 未割当×品番×状態 → 数量)
+' V_在庫内訳のスナップショット (ロット×状態 / 未割当×localId×状態 → 数量)
 '
-' キーは "L|ロットID|状態" または "U|品番|状態"。
+' キーは "L|ロットID|状態" または "U|localId|状態"。
 ' ブックの既知の不整合により数量が負のバケットが存在し得る。
 ' 消費可能量としては負は 0 として扱う (AvailableQty)。
 '==============================================================================
@@ -39,8 +39,8 @@ Public Sub SetLotQty(ByVal lotId As String, ByVal state As String, ByVal qty As 
     mDict(Me.BucketKey("L", lotId, state)) = qty
 End Sub
 
-Public Sub SetUnallocQty(ByVal itemNo As String, ByVal state As String, ByVal qty As Long)
-    mDict(Me.BucketKey("U", itemNo, state)) = qty
+Public Sub SetUnallocQty(ByVal localId As String, ByVal state As String, ByVal qty As Long)
+    mDict(Me.BucketKey("U", localId, state)) = qty
 End Sub
 
 ' 生の数量 (負もあり得る)。未登録は 0

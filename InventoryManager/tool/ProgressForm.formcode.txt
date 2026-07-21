@@ -23,10 +23,13 @@ Public Sub InitDialog(ByVal ctx As c_DialogContext)
 
     Set mLots = New Collection
     Dim lt As c_LotInfo
+    Dim it As c_ItemInfo
     For Each lt In ctx.Lots
         If lt.PlanStatus = "有効" Then
             mLots.Add lt
-            cmbLot.AddItem lt.LotId & "  (必要 " & lt.Required & ")"
+            Set it = ctx.FindItemByLocalId(lt.LocalId)
+            cmbLot.AddItem lt.LotId & _
+                IIf(it Is Nothing, "", "  " & it.ItemName) & "  (必要 " & lt.Required & ")"
         End If
     Next
     m_LedgerFormUtil.FillCommon mCtx, cmbRecorder, txtDate
@@ -38,12 +41,12 @@ Private Sub cmbLot_Change()
     If cmbLot.ListIndex < 0 Then Exit Sub
 
     Dim lt As c_LotInfo: Set lt = mLots(cmbLot.ListIndex + 1)
-    Dim it As c_ItemInfo: Set it = mCtx.FindItem(lt.ItemNo)
+    Dim it As c_ItemInfo: Set it = mCtx.FindItemByLocalId(lt.LocalId)
     If it Is Nothing Then
-        lblItem.Caption = "品番 " & lt.ItemNo & " が M_品番 にありません"
+        lblItem.Caption = "localId " & lt.LocalId & " が M_品番 にありません"
         Exit Sub
     End If
-    lblItem.Caption = it.ItemNo & "  " & it.ItemName & "  (パターン " & it.Pattern & ")" & _
+    lblItem.Caption = m_LedgerFormUtil.DescribeItem(it) & "  (パターン " & it.Pattern & ")" & _
                       vbCrLf & "在庫: " & m_LedgerFormUtil.DescribeStates(mCtx, "L", lt.LotId)
 
     m_LedgerFormUtil.FillCombo cmbEvent, m_LedgerCore.AllowedEvents(it.Pattern)
@@ -54,7 +57,7 @@ Private Sub cmbEvent_Change()
     If cmbLot.ListIndex < 0 Or cmbEvent.ListIndex < 0 Then Exit Sub
 
     Dim lt As c_LotInfo: Set lt = mLots(cmbLot.ListIndex + 1)
-    Dim it As c_ItemInfo: Set it = mCtx.FindItem(lt.ItemNo)
+    Dim it As c_ItemInfo: Set it = mCtx.FindItemByLocalId(lt.LocalId)
     If it Is Nothing Then Exit Sub
 
     Dim fromState As String: fromState = m_LedgerCore.DeriveFromState(it.Pattern, cmbEvent.Text)

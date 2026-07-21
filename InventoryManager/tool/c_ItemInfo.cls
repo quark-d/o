@@ -13,6 +13,7 @@ Option Explicit
 ' 品番マスタ 1 行分 (M_品番のスナップショット)
 '==============================================================================
 
-Public ItemNo As String        ' 品番
+Public LocalId As String       ' localId (内部ID。接頭辞+連番の文字列。集計キー)
+Public ItemNo As String        ' 品番 (対外向け8桁番号)
 Public ItemName As String      ' 品名
 Public Pattern As Long         ' 工程パターン 1～4
